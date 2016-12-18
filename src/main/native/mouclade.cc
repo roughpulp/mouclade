@@ -134,82 +134,112 @@ private:
 
 typedef struct pollfd t_pollfd;
 
-class PolledPipe {
+class PolledFd {
 public:
-    PolledPipe(t_pollfd& in, t_pollfd& out, int capacity): in_(in), out_(out), read_mode_(true), buffer_(capacity) {}
-    
-    bool can_read() const { return read_mode_; }
-    
-    bool can_write() const { return ! read_mode_; }
-
-    void prepare_polling() {
-        if (can_read()) {
-            in_.events |= POLLIN;
-        }
-        if (can_write()) {
-            out_.events |= POLLOUT;
-        }
+	PolledFd(
+        int fd,
+        Buffer* r_buffer,
+        Buffer* w_buffer
+    ):
+        fd_(fd),
+        r_buffer_(r_buffer),
+        w_buffer_(w_buffer),
+        on_read_([] () {}),
+        on_write_([] () {}),
+        io_flags_(0)
+    {
     }
+
+    int fd() { return fd_; }
     
-    void handle_io() {
-        if (can_read()) {
-            handle_read();
-        }
-        if (can_write()) {
-            handle_write();
-        }
+    void set_read() { io_flag_on(POLLIN); }
+    
+    void unset_read() { io_flag_off(POLLIN); }
+    
+    void set_write() { io_flag_on(POLLOUT); }
+    
+    void unset_write() { io_flag_off(POLLOUT); }
+    
+    void on_read(function<void ()> func) { on_read_ = func; }
+    
+    void on_write(function<void ()> func) { on_write_ = func; }
+    
+    void prepare_ios(t_pollfd& poll) {
+        poll.events = io_flags_;
+        poll.revents = 0;
+    }
+
+    void handle_ios(t_pollfd& poll) {
+        check_io_error(poll);
+        handle_io(poll, r_buffer_, POLLIN, on_read_);
+        handle_io(poll, w_buffer_, POLLOUT, on_write_);
     }
 
 private:
-	PolledPipe(const PolledPipe& that) = delete;
-	PolledPipe& operator=(const PolledPipe& that) = delete;
+	PolledFd(const PolledFd& that) = delete;
+	PolledFd& operator=(const PolledFd& that) = delete;
 
-    static void check_io_error(short revents) {
+    void io_flag_on(short flag) {
+        io_flags_ |= flag;
+    }
+    
+    void io_flag_off(short flag) {
+        io_flags_ &= ~flag;
+    }
+    
+    void check_io_error(t_pollfd& poll) {
         short mask = ~(POLLIN | POLLOUT);
-        if (revents & mask) {
+        if (poll.revents & mask) {
             throw runtime_error("io error");
         }
     }
 
-    void handle_read() {
-        check_io_error(in_.revents);
-        if ((in_.revents & POLLIN) && (buffer_.remaining() > 0)) {
-            int before = buffer_.remaining();
-            buffer_.read(in_.fd);
-            if (buffer_.remaining() == before) {
-                throw runtime_error("POLLIN flag present but read nothing"); // protect against endless loop
+    bool handle_io(t_pollfd& poll, Buffer* buffer, short io_flag, function<void ()> callback) {
+        if ( (buffer != nullptr) && (poll.revents & io_flag) && (buffer->remaining() > 0) ) {
+            const int before = buffer->remaining();
+            switch (io_flag) {
+                case POLLIN:  buffer->read(poll.fd); break;
+                case POLLOUT: buffer->write(poll.fd); break;
+                default: throw runtime_error("unexpected io_flag" + to_string(io_flag));
             }
-            if (buffer_.position() > 0) {
-                buffer_.flip();
-                set_write_mode();
+            if (buffer->remaining() == before) {
+                throw runtime_error("POLLIN or POLLOUT flag set, but read or wrote nothing"); // protect against endless loop
             }
-        }
-    }
-
-    void handle_write() {
-        check_io_error(out_.revents);
-        if ((out_.revents & POLLOUT) && (buffer_.remaining() > 0)) {
-            int before = buffer_.remaining();
-            buffer_.write(out_.fd);
-            if (buffer_.remaining() == before) {
-                throw runtime_error("POLLOUT flag present but wrote nothing"); // protect against endless loop
-            }
-            if (buffer_.remaining() == 0) {
-                buffer_.clear();
-                set_read_mode();
-            }
+            callback();
+            return true;
+        } else {
+            return false;
         }
     }
     
-    void set_read_mode() { read_mode_ = true; }
-    
-    void set_write_mode() { read_mode_ = false; }
-    
-    t_pollfd& in_;
-    t_pollfd& out_;
-    bool read_mode_;    // true: read, false: write
-    Buffer buffer_;
+    const int fd_;
+    Buffer* r_buffer_;
+    Buffer* w_buffer_;
+    function<void ()> on_read_;
+    function<void ()> on_write_;
+    short io_flags_;
 };
+
+void io_loop(vector<PolledFd*>& fds)
+{
+    const int size = fds.size();
+    vector<t_pollfd> polls(size);
+    for (int ii = 0; ii < size; ++ii) {
+        polls[ii].fd = fds[ii]->fd();
+    }
+    for (;;) {
+        for (int ii = 0; ii < size; ++ii) {
+            fds[ii]->prepare_ios(polls[ii]);
+        }
+        int poll_count = poll(&polls[0], size, -1);
+        if (poll_count == -1) {
+            throw std::runtime_error("poll error");
+        }
+        for (int ii = 0; ii < size; ++ii) {
+            fds[ii]->handle_ios(polls[ii]);
+        }
+    }
+}
 
 void set_window_size(int fd, int rows, int cols) {
     struct winsize wsize;
@@ -397,9 +427,7 @@ int run_uts() {
     return 0;
 }
 
-
 }
-
 
 int mouclade_run(Args& args)
 {
@@ -412,30 +440,42 @@ int mouclade_run(Args& args)
     FileDesc::set_nonblocking(1);
     FileDesc::set_nonblocking(master_fd);
     
-    vector<t_pollfd> polls(3);
-    polls[0].fd = 0;
-    polls[1].fd = 1;
-    polls[2].fd = master_fd;
-
-    PolledPipe in_2_slave(polls[0], polls[2], 1024);
-    PolledPipe slave_2_out(polls[2], polls[1], 1024);
-
-    for (;;) {
-        for(auto fd_it = polls.begin(); fd_it != polls.end(); ++fd_it) {
-            fd_it->events = 0;
-            fd_it->revents = 0;
-        }
-        in_2_slave.prepare_polling();
-        slave_2_out.prepare_polling();
+    Buffer in_2_slave(1024);
+    Buffer slave_2_out(1024);
         
-        int polled = poll(&polls[0], polls.size(), -1);
-        if (polled == -1) {
-            throw std::runtime_error("poll error");
-        }
-        
-        in_2_slave.handle_io();
-        slave_2_out.handle_io();
-    }
+    PolledFd in(0, &in_2_slave, nullptr);
+    PolledFd out(1, nullptr, &slave_2_out);
+    PolledFd slave(master_fd, &slave_2_out, &in_2_slave);
+    
+    in.on_read([&in, &slave, &in_2_slave] () {
+        in_2_slave.flip();
+        in.unset_read();
+        slave.set_write();
+    });
+    in.set_read();
+    out.on_write([&out, &slave, &slave_2_out] () {
+        slave_2_out.clear();
+        out.unset_write();
+        slave.set_read();
+    });
+    slave.on_read([&out, &slave, &slave_2_out] () {
+        slave_2_out.flip();
+        out.set_write();
+        slave.unset_read();
+    });
+    slave.set_read();
+    slave.on_write([&in, &slave, &in_2_slave] () {
+        in_2_slave.clear();
+        in.set_read();
+        slave.unset_write();
+    });
+
+    vector<PolledFd*> fds(3);
+    fds[0] = &in;
+    fds[1] = &out;
+    fds[2] = &slave;
+
+    io_loop(fds);
 }
 
 enum Action {
@@ -495,11 +535,6 @@ int main(int argc, char* argv[]) {
                 return mouclade_run(args);
             default:
                 throw runtime_error("unexpected action");
-        }
-        if (parse_args(argc, argv, args)) {
-            return mouclade_run(args);
-        } else {
-            return -2;
         }
     } catch (const exception& ex) {
         cerr << "fatal error: " << ex.what() << endl;
