@@ -269,10 +269,14 @@ public:
 
 class Args {
 public:
-    Args(): termenv_("xterm"), winsize_(100, 80) {}
+    Args(): termenv_("xterm"), winsize_(100, 80), log_ios_path_("") {}
 
     string termenv_;
     WindowSize winsize_;
+    string log_ios_path_;
+    
+    bool log_ios() { return log_ios_path_.size() > 0; }
+    
 };
 
 
@@ -429,6 +433,17 @@ int run_uts() {
 
 }
 
+void log_ios(Args& args, const Buffer& buffer, fs::ofstream& log, const char* const header) {
+    if (args.log_ios()) {
+        log << header << endl;
+        for (int ii = buffer.position(); ii < buffer.limit(); ++ii) {
+            log << buffer[ii];
+        }
+        log << endl;
+        log.flush();
+    }
+}
+
 int mouclade_run(Args& args)
 {
     auto pty = Pty::open(args);
@@ -446,9 +461,15 @@ int mouclade_run(Args& args)
     PolledFd in(0, &in_2_slave, nullptr);
     PolledFd out(1, nullptr, &slave_2_out);
     PolledFd slave(master_fd, &slave_2_out, &in_2_slave);
+
+    fs::ofstream log;
+    if (args.log_ios()) {
+        log.open(fs::path(args.log_ios_path_));
+    }
     
-    in.on_read([&in, &slave, &in_2_slave] () {
+    in.on_read([&in, &slave, &in_2_slave, &args, &log] () {
         in_2_slave.flip();
+        log_ios(args, in_2_slave, log, "TO:");
         in.unset_read();
         slave.set_write();
     });
@@ -458,8 +479,9 @@ int mouclade_run(Args& args)
         out.unset_write();
         slave.set_read();
     });
-    slave.on_read([&out, &slave, &slave_2_out] () {
+    slave.on_read([&out, &slave, &slave_2_out, &args, &log] () {
         slave_2_out.flip();
+        log_ios(args, slave_2_out, log, "FROM:");
         out.set_write();
         slave.unset_read();
     });
@@ -489,9 +511,10 @@ Action parse_args(int argc, char* argv[], Args& args) {
     desc.add_options()
         ("help", "prints help")
         ("ut", "run unit tests")
-        ("term", "TERM env value to use, defaults to xterm")
-        ("cols", "initial window cols")
-        ("rows", "initial window rows")
+        ("term", program_opts::value<string>(), "TERM env value to use, defaults to xterm")
+        ("cols", program_opts::value<int>(), "initial window cols")
+        ("rows", program_opts::value<int>(), "initial window rows")
+        ("log-ios", program_opts::value<string>(), "path to where all ios will be logged")
     ;
     
     program_opts::variables_map opts;
@@ -513,6 +536,9 @@ Action parse_args(int argc, char* argv[], Args& args) {
     }
     if (opts.count("rows")) {
         args.winsize_.rows_ = opts["rows"].as<int>();
+    }
+    if (opts.count("log-ios")) {
+        args.log_ios_path_ = opts["log-ios"].as<string>();
     }
     return Action::RUN;
 }
