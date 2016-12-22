@@ -1,0 +1,10 @@
+*.class
+*.o
+*.exe
+
+# maven specific
+target/
+
+# Idea specific
+.idea
+*.iml
