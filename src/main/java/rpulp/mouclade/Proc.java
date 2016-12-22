@@ -1,5 +1,6 @@
 package rpulp.mouclade;
 
+import javafx.concurrent.Task;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -16,10 +17,9 @@ public class Proc implements AutoCloseable {
         void onInput(byte[] bytes, int len);
     }
 
-    private static class InputReader implements Runnable, AutoCloseable {
-
+    private static class InputReader extends Task<Void> implements AutoCloseable {
         private final InputStream in;
-        private final byte[] bytes = new byte[1024];
+        private final byte[] bytes = new byte[512];
         private final InputListener listener;
         private final Thread thread;
 
@@ -41,7 +41,7 @@ public class Proc implements AutoCloseable {
         }
 
         @Override
-        public void run() {
+        protected Void call() throws Exception {
             LOGGER.info("InputReader started");
             try {
                 runInner();
@@ -50,6 +50,7 @@ public class Proc implements AutoCloseable {
             } finally {
                 LOGGER.info("InputReader stopped");
             }
+            return null;
         }
 
         private void runInner() throws IOException {
@@ -57,21 +58,6 @@ public class Proc implements AutoCloseable {
                 final int len = in.read(bytes);
                 if (len == -1) {
                     return;
-                }
-                {
-                    StringBuilder sb = new StringBuilder();
-                    sb.append(new String(bytes, 0, len));
-                    for (int ii = 0; ii < len; ++ii) {
-                        if (ii % 20 == 0) {
-                            sb.append("\n");
-                        }
-                        int byt = bytes[ii];
-                        if (byt < 16) {
-                            sb.append("0");
-                        }
-                        sb.append(Integer.toHexString(byt));
-                    }
-                    LOGGER.info(sb.toString());
                 }
                 listener.onInput(bytes, len);
             }
@@ -81,8 +67,7 @@ public class Proc implements AutoCloseable {
     public static Proc start(
             List<String> cmd,
             InputListener stdoutListener,
-            InputListener stderrListener
-    ) throws IOException {
+            InputListener stderrListener) throws IOException {
         ProcessBuilder builder = new ProcessBuilder().command(cmd);
         buildPathEnv(builder);
         Process process = builder.start();
@@ -96,7 +81,7 @@ public class Proc implements AutoCloseable {
 
     private static void buildPathEnv(ProcessBuilder builder) {
         String path = System.getenv("PATH");
-        path += Config.EXTRA_PATH;
+        path += Config.PATH;
         builder.environment().put("PATH", path);
     }
 
@@ -125,8 +110,6 @@ public class Proc implements AutoCloseable {
             }
         }
     }
-
-    public Process process() { return process; }
 
     public OutputStream output() { return output; }
 

@@ -1,6 +1,29 @@
 package rpulp.mouclade;
 
-public class Config {
-    public static final String EXTRA_PATH = ";C:\\cygwin\\root\\bin";
-    public static final String NATIVE_EXE_PATH = "C:\\Users\\a.antoniotti\\src\\my\\mouclade\\src\\main\\native\\mouclade.exe";
+
+import com.google.common.collect.Lists;
+
+import java.util.ArrayList;
+
+
+class Config {
+
+    private static String getEnvOrFail(String name) {
+        String value = System.getenv(name);
+        if (value == null) {
+            throw new IllegalArgumentException("missing env " + name);
+        }
+        return value;
+    }
+
+    private static final String EXE;
+    private static final String IOS_LOG;
+    static {
+        EXE = getEnvOrFail("MOUCLADE_EXE");
+        IOS_LOG = getEnvOrFail("MOUCLADE_IOS_LOG");
+
+    }
+
+    static final String PATH = getEnvOrFail("MOUCLADE_PATH");
+    static final ArrayList<String> NATIVE_COMMAND = Lists.newArrayList(EXE, "--log-ios", IOS_LOG);
 }

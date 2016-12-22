@@ -1,69 +1,61 @@
 package rpulp.mouclade;
 
-import com.google.common.collect.Lists;
 import javafx.application.Application;
+import javafx.concurrent.Task;
 import javafx.scene.Scene;
+import javafx.scene.image.Image;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
-import javafx.scene.text.Text;
 import javafx.stage.Stage;
-import org.pmw.tinylog.Configurator;
-import org.pmw.tinylog.Level;
-import org.pmw.tinylog.writers.ConsoleWriter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.URL;
 
 public class UiMain extends Application{
 
     private static final Logger LOGGER = LoggerFactory.getLogger(UiMain.class);
 
-    private static void initLogging() {
-        Configurator.defaultConfig()
-                .writer(new ConsoleWriter())
-                .formatPattern("{date:yyyy-MM-dd HH:mm:ss} - {level} [{thread}] {message}")
-                .level(Level.DEBUG)
-                .activate();
-    }
-
     @Override
     public void start(Stage stage) throws Exception {
-
-        Text text = new Text("coucou");
+        loadIcon(stage);
+        TerminalModel terminalModel = new TerminalModel();
+        InputParser inputParser = new InputParser(terminalModel);
+        TerminalView terminalView = new TerminalView(terminalModel);
 
         VBox vbox = new VBox();
-        vbox.getChildren().addAll(text);
+        vbox.getChildren().addAll(terminalView.node());
         StackPane root = new StackPane();
         root.getChildren().add(vbox);
         Scene scene = new Scene(root);
 
-        Thread thread = new Thread(() -> {
-            try {
-                Proc proc = Proc.start(
-                        Lists.newArrayList(Config.NATIVE_EXE_PATH),
-                        (bytes, len) -> {
-                            text.setText(new String(bytes, 0, len));
-                        },
-                        (bytes, len) -> {
-                            text.setText(new String(bytes, 0, len));
-                        }
-                );
+        Proc proc = Proc.start(
+                Config.NATIVE_COMMAND,
+                (bytes, len) -> inputParser.parse(bytes, 0, len),
+                (bytes, len) -> inputParser.parse(bytes, 0, len)
+        );
+        KeyboardInput keyboardInput = new KeyboardInput(proc.output());
+        scene.setOnKeyTyped(keyboardInput.keyTypedHandler());
 
-                proc.output().write("ls -lah \r\n".getBytes());
-
-                KeyboardInput keyboardInput = new KeyboardInput(proc.output());
-                scene.setOnKeyPressed(keyboardInput.keyPressedHandler());
-                scene.setOnKeyReleased(keyboardInput.keyReleasedHandler());
-
-                LOGGER.info("proc waitfor ...");
-                proc.join();
-            } catch (Exception ex) {
-                LOGGER.error("proc died: " + ex, ex);
-            } finally {
-                LOGGER.info("proc done");
+        Task waitForProcTask = new Task<Void>() {
+            @Override
+            protected Void call() throws Exception {
+                try {
+                    LOGGER.info("proc waitfor ...");
+                    proc.join();
+                } catch (Exception ex) {
+                    LOGGER.error("proc died: " + ex, ex);
+                } finally {
+                    LOGGER.info("proc done");
+                }
+                return null;
             }
-        });
-        thread.setDaemon(true);
-        thread.start();
+        };
+        Thread waitForProcThread = new Thread(waitForProcTask);
+        waitForProcThread.setDaemon(true);
+        waitForProcThread.start();
 
         stage.setTitle("Mouclade");
         stage.setScene(scene);
@@ -71,8 +63,22 @@ public class UiMain extends Application{
         stage.show();
     }
 
+    private void loadIcon(Stage stage) {
+        URL url = Thread.currentThread().getContextClassLoader().getResource("icon.1.64x64.png");
+        if (url == null) {
+            throw new RuntimeException("icon resource not found");
+        }
+        try {
+            try (InputStream in = url.openStream()) {
+                stage.getIcons().add(new Image(in));
+            }
+        } catch (IOException ex) {
+            throw new RuntimeException(ex);
+        }
+    }
+
     public static void  main(String... args) throws Exception {
-        initLogging();
+        Log.init();
         launch(args);
     }
 }
