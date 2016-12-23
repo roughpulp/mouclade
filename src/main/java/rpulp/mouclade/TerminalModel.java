@@ -5,9 +5,9 @@ import java.util.Arrays;
 class TerminalModel implements InputParser.Listener{
 
     interface Listener {
-        void onCellUpdate(int at);
+        void onCellUpdate(int x, int y);
 
-        void onCellRangeUpdate(int start, int len);
+        void onFullUpdate();
     }
 
     private int width = 0;
@@ -56,9 +56,9 @@ class TerminalModel implements InputParser.Listener{
         this.listener = listener;
     }
 
-    private void updateCell(int at) {
+    private void updateCell(int x, int y) {
         if (listener != null) {
-            listener.onCellUpdate(at);
+            listener.onCellUpdate(x, y);
         }
     }
 
@@ -66,7 +66,7 @@ class TerminalModel implements InputParser.Listener{
     private void badMethod() {
         System.arraycopy(chars, width, chars, 0, chars.length - width);
         Arrays.fill(chars, chars.length - width, chars.length, ' ');
-        listener.onCellRangeUpdate(0, chars.length);
+        listener.onFullUpdate();
     }
 
     @Override public void addChar(int byt) {
@@ -91,11 +91,11 @@ class TerminalModel implements InputParser.Listener{
     private void addNormalChar(char car) {
         int at = at(caretX, caretY);
         chars[at] = car;
-        updateCell(at);
+        updateCell(caretX, caretY);
         cursorNext();
     }
 
-    void backspace() {
+    private void backspace() {
         if (caretX > 0) {
             --caretX;
         } else if (caretY > 0) {
@@ -104,7 +104,7 @@ class TerminalModel implements InputParser.Listener{
         }
     }
 
-    void lineFeed() {
+    private void lineFeed() {
         if (caretY == height - 1) {
             badMethod();
         } else {
@@ -112,23 +112,19 @@ class TerminalModel implements InputParser.Listener{
         }
     }
 
-    void carriageReturn() {
+    private void carriageReturn() {
         caretX = 0;
     }
 
-    void cursorReturn() {
-        lineFeed();
-        carriageReturn();
-    }
+    private void htab() {}
 
-    void htab() {}
+    private void formFeed() {}
 
-    void formFeed() {}
-
-    void cursorNext() {
+    private void cursorNext() {
         ++caretX;
         if (caretX == width) {
-            cursorReturn();
+            lineFeed();
+            carriageReturn();
         }
     }
 

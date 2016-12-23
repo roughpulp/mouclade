@@ -7,6 +7,7 @@ import javafx.scene.image.Image;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
+import javafx.stage.StageStyle;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -59,7 +60,6 @@ public class UiMain extends Application{
 
         stage.setTitle("Mouclade");
         stage.setScene(scene);
-//        stage.setMaximized(true);
         stage.show();
     }
 
