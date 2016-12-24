@@ -129,15 +129,19 @@ class TerminalModel implements InputParser.Listener{
     }
 
     @Override public void cursorUp(int n) {
+        caretY = Math.max(0, caretY - n);
     }
 
     @Override public void cursorDown(int n) {
+        caretY = Math.min(height - 1, caretY + n);
     }
 
     @Override public void cursorForward(int n) {
+        caretX = Math.min(width - 1, caretX + n);
     }
 
     @Override public void cursorBack(int n) {
+        caretX = Math.max(0, caretX - n);
     }
 
     @Override public void cursorNextLine(int n) {
@@ -150,12 +154,56 @@ class TerminalModel implements InputParser.Listener{
     }
 
     @Override public void cursorPosition(int row, int col) {
+        caretX = col - 1; // 1 based
+        caretY = row - 1; // 1 based
     }
 
     @Override public void eraseDisplay(int n) {
+        int beg;
+        int end;
+        switch(n) {
+            case 0:
+                beg = at(caretX, caretY);
+                end = at(width - 1, height - 1) + 1;
+                break;
+            case 1:
+                beg = 0;
+                end = at(caretX, caretY);
+                break;
+            case 2:
+                beg = 0;
+                end = at(width - 1, height - 1) + 1;
+                break;
+            default: return;
+        }
+        for (int ii = beg; ii < end; ++ii) {
+            chars[ii] = ' ';
+        }
+        listener.onFullUpdate();
     }
 
     @Override public void eraseInLine(int n) {
+        int beg;
+        int end;
+        switch(n) {
+            case 0:
+                beg = at(caretX, caretY);
+                end = at(width - 1, caretY) + 1;
+                break;
+            case 1:
+                beg = at(0, caretY);
+                end = at(caretX, caretY);
+                break;
+            case 2:
+                beg = at(0, caretY);
+                end = at(width - 1, caretY) + 1;
+                break;
+            default: return;
+        }
+        for (int ii = beg; ii < end; ++ii) {
+            chars[ii] = ' ';
+        }
+        listener.onFullUpdate();
     }
 
     @Override public void scrollUp(int n) {
